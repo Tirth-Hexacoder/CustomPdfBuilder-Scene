@@ -2,19 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import toast, { Toaster } from "react-hot-toast";
 import { SceneTab } from "./components/scene/SceneTab";
 import type { ReviewImage, ReviewSnapshot } from "./types";
-import { clearLatestSnapshotFromIdb, loadLatestSnapshotFromIdb, saveLatestSnapshotToIdb } from "./utils/idbSnapshotTransport";
-
-function parseSnapshotFromUrl(): ReviewSnapshot | null {
-  const params = new URLSearchParams(window.location.search);
-  const raw = params.get("data") || params.get("snapshot") || "";
-  if (!raw) return null;
-  try {
-    const decoded = decodeURIComponent(raw);
-    return JSON.parse(decoded) as ReviewSnapshot;
-  } catch {
-    return null;
-  }
-}
 
 function getEditorUrl(): string {
   const params = new URLSearchParams(window.location.search);
@@ -22,11 +9,19 @@ function getEditorUrl(): string {
   return fromQuery || (import.meta as any).env?.VITE_EDITOR_URL || "http://localhost:5173/";
 }
 
-function getSceneUrl(): string {
-  return window.location.origin + window.location.pathname;
+function normalizeBaseUrl(value: string) {
+  return value.replace(/\/+$/, "");
 }
 
-const MAX_URL_PAYLOAD_CHARS = 4000;
+function getApiBaseUrl() {
+  return normalizeBaseUrl(String((import.meta as any).env?.VITE_API_BASE_URL || "http://localhost:4000/api"));
+}
+
+function joinUrl(baseUrl: string, path: string) {
+  const normalizedBase = normalizeBaseUrl(baseUrl);
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  return `${normalizedBase}${normalizedPath}`;
+}
 
 export function App() {
   const params = useMemo(() => new URLSearchParams(window.location.search), []);
@@ -34,7 +29,7 @@ export function App() {
   
   const [projectId] = useState(params.get("projectId") || `user${user}_proj`);
   const [closetId] = useState(params.get("closetId") || `user${user}_closet`);
-  const [token] = useState(params.get("token") || "dummy_auth_token_42");
+  const token = String((import.meta as any).env?.VITE_PDF_BUILDER_AUTH_TOKEN || "dummy_auth_token_42");
   
   const editorUrl = useMemo(() => getEditorUrl(), []);
   const [snapshot, setSnapshot] = useState<ReviewSnapshot>({ images: [], pages: [] });
@@ -42,7 +37,7 @@ export function App() {
 
   useEffect(() => {
     // We always check the database for current images to allow roaming profiles
-    fetch(`http://localhost:4000/api/project/${projectId}/closet/${closetId}`, {
+    fetch(joinUrl(getApiBaseUrl(), `/project/${encodeURIComponent(projectId)}/closet/${encodeURIComponent(closetId)}`), {
       cache: "no-store",
       headers: {
         "Pragma": "no-cache",
@@ -73,7 +68,7 @@ export function App() {
         return;
       }
       
-      const response = await fetch("http://localhost:4000/api/save-scene", {
+      const response = await fetch(joinUrl(getApiBaseUrl(), "/save-scene"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ projectId, closetId, images: payloadArr })
@@ -97,7 +92,12 @@ export function App() {
   };
 
   const goToEditor = () => {
-    window.location.href = `${editorUrl}?projectId=${projectId}&closetId=${closetId}&token=${token}`;
+    try {
+      window.name = JSON.stringify({ pdfBuilderAuthToken: token });
+    } catch {
+      // ignore
+    }
+    window.location.href = `${editorUrl}?projectId=${encodeURIComponent(projectId)}&closetId=${encodeURIComponent(closetId)}`;
   };
 
   return (
